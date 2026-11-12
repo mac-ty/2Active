@@ -45,7 +45,7 @@
 **Sign up and verify**
 1. User submits name, email and password.
 2. Backend validates, stores the user as unverified, and sends a verification email through Brevo.
-3. User clicks the link within 5 minutes.
+3. User copies and submites the verification code within 5 minutes.
 4. Backend marks the user as verified.
 
 **Login and session**
@@ -168,13 +168,13 @@ Responses:
 - `422` invalid input (blank name, bad email, password breaks the rules)
 
 #### `GET /auth/verify-email?token=<token>`
-Verify an email address using the link from the email.
+Verify an email address by submiting the code sent to the email.
 
 Responses:
 - `200` email verified
 - `400` token invalid, already used, or expired (older than 5 minutes)
 
-❓ Whether the link in the email points to the backend or to a frontend page that then calls this endpoint is open.
+
 
 #### `POST /auth/login`
 Request:

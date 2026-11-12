@@ -34,7 +34,7 @@ As a student, I want to:
 | # | Requirement |
 |---|---|
 | U1 | Sign up with my email, name and password |
-| U2 | Verify my email address through a link sent to me (the link lasts 5 minutes) |
+| U2 | Verify my email address through a code sent to me (the link lasts 5 minutes) |
 | U3 | Log in (only after I have verified my email) and log out |
 | U4 | Reset my password if I forget it |
 | U5 | Create a task with a title, description, priority, due date, and reminder settings |
