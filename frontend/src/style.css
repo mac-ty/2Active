@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --font-heading: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Nunito", ui-sans-serif, system-ui, sans-serif;
+
+  --color-navy-blue: oklch(17.972% 0.04071 279.307);
+  --color-pink: oklch(57.058% 0.26116 325.815);
+  --color-light-navy-blue: rgba(60, 45, 124, 0.4);
+  --color-light-pink: oklch(57.058% 0.26116 325.815 / 0.18);
+  --color-grey: oklch(87.61% 0.0001 271.152 / 0.3);
+  --color-dark-blue: rgb(15, 12, 59);
+}
