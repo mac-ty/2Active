@@ -115,7 +115,7 @@ Both flows use a 6-digit code sent by email, which proves the person owns the em
 | `user_id` | UUID | Required, foreign key to `users.id` |
 | `code_hash` | string | The 6-digit code, stored hashed. Never stored in plain text |
 | `purpose` | enum | `verify_email` or `reset_password` |
-| `expires_at` | timestamp | Verification: 5 minutes after creation. Reset: 10 minutes after creation
+| `expires_at` | timestamp | Verification: 5 minutes after creation. Reset: 10 minutes after creation|
 | `used` | boolean | Default `false`. A code can only be used once |
 | `failed_attempts` | integer | Default `0`. After 5 wrong attempts the code stops working |
 | `created_at` | timestamp | Set on creation. Used for the 60-second wait between requests |
@@ -133,8 +133,8 @@ Session-based auth is decided. **Where session data is stored** (a database tabl
 
 ### 2.5 Relationships
 
-- One user has many email codes. (`tasks.user_id` → `users.id`).
-- One user has many email tokens.
+- One user has many tasks (`tasks.user_id` → `users.id`).
+- One user has many email codes (`email_codes.user_id` → `users.id`).
 - Deleting a task removes it permanently. What happens to a user's tasks if a user is removed is ❓ not decided (account deletion is not in the MVP).
 
 ### 2.6 Validation rules (the "create task" step)
@@ -157,7 +157,7 @@ Session-based auth is decided. **Where session data is stored** (a database tabl
 
 **General rules**
 - All request and response bodies are JSON.
-- - Base URL: http://127.0.0.1:8000 locally, and https://student-todo-api.onrender.com in production.
+- Base URL: http://127.0.0.1:8000 locally, and https://student-todo-api.onrender.com in production.
 - **Session cookie:** set by `POST /auth/login`. The frontend sends it on every request (credentials included).
 - All `/tasks` endpoints require a valid session. Without one the response is `401`.
 - Error body: a JSON object with a `detail` field describing the problem (FastAPI's default format) ⚠.
@@ -307,7 +307,7 @@ Settings are provided as environment variables: database connection (`DATABASE_U
 
 ## 4. Testing Approach
 
-- **Backend:** pytest for every endpoint, including the unhappy paths (unverified login, expired token, another user's task).
+- **Backend:** pytest for every endpoint, including the unhappy paths (unverified login, expired code, another user's task).
 - **Frontend:** linting on every change. ❓ Linter not chosen.
 - **Integration:** every milestone below ends with an integration test where the **deployed or local frontend talks to the real backend**.
 
