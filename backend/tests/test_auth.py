@@ -1,3 +1,11 @@
+"""
+Authentication endpoint tests.
+
+Verifies user registration, email verification,
+verification code validation, and verification
+code resend behavior.
+"""
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
