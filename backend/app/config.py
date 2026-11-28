@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     brevo_api_key: str
     session_secret: str
     frontend_origin: str
+    brevo_sender_email: str
+    brevo_sender_name: str
 
     model_config = SettingsConfigDict(env_file=".env")
 

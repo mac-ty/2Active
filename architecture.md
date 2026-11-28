@@ -34,9 +34,9 @@
 
 | Component | Responsibility |
 |---|---|
-| **Frontend (Vercel)** | Pages for sign up, login, email verification result, password reset, and task management. Sends requests to the backend and shows results. Mobile-first layout. |
+| **Frontend (Vercel)** | Pages for sign up, login, email verification code entry, password reset, and task management. Sends requests to the backend and shows results. Mobile-first layout. |
 | **Backend (Render)** | Authentication and sessions, input validation, task logic, email sending, and database access. Enforces that users only touch their own tasks. |
-| **PostgreSQL** | Stores users, tasks and the tokens used for verification and password reset. |
+| **PostgreSQL** | Stores users, tasks and the codes used for verification and password reset. |
 | **Brevo API** | Sends verification emails, password reset emails and task reminder emails. |
 | **Reminder trigger** | Runs every day at 6 AM and sends reminder emails for tasks that qualify (see 1.3). ❓ The mechanism is undecided. |
 
@@ -44,8 +44,8 @@
 
 **Sign up and verify**
 1. User submits name, email and password.
-2. Backend validates, stores the user as unverified, and sends a verification email through Brevo.
-3. User copies and submites the verification code within 5 minutes.
+2. Backend validates, stores the user as unverified, and sends a verification email with a 6-digit code through Brevo.
+3. User enters the 6-digit code from the email within 5 minutes.
 4. Backend marks the user as verified.
 
 **Login and session**
@@ -71,7 +71,7 @@ The frontend and backend live on different domains and auth uses a session cooki
 
 ### 1.4 Repository
 
-One GitHub repository contains both the frontend and backend projects. ❓ The folder layout is not decided.
+One GitHub repository contains both projects, in two folders at the root: backend/ and frontend/.
 
 ---
 
@@ -81,18 +81,18 @@ One GitHub repository contains both the frontend and backend projects. ❓ The f
 
 | Column | Type | Rules |
 |---|---|---|
-| `id` | integer or UUID ❓ | Primary key |
+| `id` | UUID  | Primary key |
 | `name` | string | Required |
 | `email` | string | Required, **unique** |
 | `password_hash` | string | Required. Passwords are never stored in plain text |
-| `is_verified` | boolean | Default `false`. Set to `true` when the verification link is used |
+| `is_verified` | boolean | Default `false`. Set to true when the verification code is accepted.|
 | `created_at` | timestamp | Set on creation |
 
 ### 2.2 `tasks`
 
 | Column | Type | Rules |
 |---|---|---|
-| `task_id` | integer or UUID ❓ | Primary key |
+| `task_id` | UUID | Primary key |
 | `user_id` | same type as `users.id` | Required, foreign key to `users.id`. Every query filters by this |
 | `task_title` | string | Required |
 | `description` | text | Optional ⚠ |
@@ -105,18 +105,27 @@ One GitHub repository contains both the frontend and backend projects. ❓ The f
 | `created_at` | timestamp | Set on creation ⚠ |
 | `updated_at` | timestamp | Updated on every edit ⚠ |
 
-### 2.3 Email tokens (verification and password reset) ⚠
+### 2.3 Email codes (verification and password reset)
 
-Both flows need a link that proves the person owns the email. A stored token is needed for each.
+Both flows use a 6-digit code sent by email, which proves the person owns the email address.
 
 | Column | Type | Rules |
 |---|---|---|
-| `id` | integer or UUID | Primary key |
-| `user_id` | foreign key to `users.id` | Required |
-| `token` | string | Unique and hard to guess (stored in a safe form ❓) |
+| `id` | UUID | Primary key |
+| `user_id` | UUID | Required, foreign key to `users.id` |
+| `code_hash` | string | The 6-digit code, stored hashed. Never stored in plain text |
 | `purpose` | enum | `verify_email` or `reset_password` |
-| `expires_at` | timestamp | Verification: 5 minutes after creation. Reset: ❓ open |
-| `used` | boolean | Default `false`. A token can only be used once |
+| `expires_at` | timestamp | Verification: 5 minutes after creation. Reset: 10 minutes after creation|
+| `used` | boolean | Default `false`. A code can only be used once |
+| `failed_attempts` | integer | Default `0`. After 5 wrong attempts the code stops working |
+| `created_at` | timestamp | Set on creation. Used for the 60-second wait between requests |
+
+**Rules**
+- The code is exactly 6 digits.
+- A code is looked up by the user's email and its purpose, not by the code alone, because 6-digit codes are not unique across users.
+- A new code replaces the old one: any earlier unused code for the same user and purpose stops working.
+- A user must wait 60 seconds between code requests for the same purpose.
+- After 5 wrong attempts the code is invalidated and the user must request a new one.
 
 ### 2.4 Sessions
 
@@ -125,7 +134,7 @@ Session-based auth is decided. **Where session data is stored** (a database tabl
 ### 2.5 Relationships
 
 - One user has many tasks (`tasks.user_id` → `users.id`).
-- One user has many email tokens.
+- One user has many email codes (`email_codes.user_id` → `users.id`).
 - Deleting a task removes it permanently. What happens to a user's tasks if a user is removed is ❓ not decided (account deletion is not in the MVP).
 
 ### 2.6 Validation rules (the "create task" step)
@@ -148,7 +157,7 @@ Session-based auth is decided. **Where session data is stored** (a database tabl
 
 **General rules**
 - All request and response bodies are JSON.
-- Base URL: ❓ set per environment (local, Render).
+- Base URL: http://127.0.0.1:8000 locally, and https://student-todo-api.onrender.com in production.
 - **Session cookie:** set by `POST /auth/login`. The frontend sends it on every request (credentials included).
 - All `/tasks` endpoints require a valid session. Without one the response is `401`.
 - Error body: a JSON object with a `detail` field describing the problem (FastAPI's default format) ⚠.
@@ -167,12 +176,24 @@ Responses:
 - `409` email already registered
 - `422` invalid input (blank name, bad email, password breaks the rules)
 
-#### `GET /auth/verify-email?token=<token>`
-Verify an email address by submiting the code sent to the email.
+#### `POST /auth/verify-email`
+Verify an email address using the 6-digit code sent to it.
 
+Request:
+```json
+{ "email": "ama@example.com", "code": "123456" }
+```
 Responses:
 - `200` email verified
-- `400` token invalid, already used, or expired (older than 5 minutes)
+- `400` code is wrong, already used, expired (older than 5 minutes), or has been invalidated after 5 wrong attempts. The message is the same in every case, so it does not reveal whether the email has an account
+- `422` invalid input (bad email format, code is not exactly 6 digits)
+
+#### `POST /auth/resend-verification`
+Sends a new verification code. Any earlier unused code stops working.
+
+Request: `{ "email": "ama@example.com" }`
+- `200` always returns the same message, whether or not the email has an account or is already verified. If a code was requested less than 60 seconds ago, no new code is sent and the response is still this same `200`
+- `422` invalid email format
 
 
 
@@ -191,16 +212,19 @@ Ends the session and clears the cookie.
 - `204` done
 
 #### `POST /auth/forgot-password`
-Sends a password reset email if the account exists.
+Sends a 6-digit password reset code to the email if an account exists. Any earlier unused reset code stops working.
 
 Request: `{ "email": "ama@example.com" }`
-- `200` always returns the same message, whether or not the email exists ⚠
+- `200` always returns the same message, whether or not the email has an account. If a code was requested less than 60 seconds ago, no new code is sent and the response is still this same `200`
+- `422` invalid email format
 
 #### `POST /auth/reset-password`
-Request: `{ "token": "<token>", "new_password": "..." }`
+Sets a new password using the code from the email.
+
+Request: `{ "email": "ama@example.com", "code": "123456", "new_password": "..." }`
 - `200` password changed
-- `400` token invalid, used or expired
-- `422` new password breaks the rules
+- `400` code is wrong, already used, expired (older than 10 minutes), or invalidated after 5 wrong attempts. The message is the same in every case
+- `422` invalid input (code is not exactly 6 digits, or the new password breaks the rules: 8 to 64 characters with at least one letter and one number)
 
 #### `GET /auth/me` ⚠
 Lets the frontend ask "who is logged in?" when a page loads.
@@ -212,7 +236,7 @@ Lets the frontend ask "who is logged in?" when a page loads.
 **Task object** returned by the API:
 ```json
 {
-  "task_id": 12,
+  "task_id":  "3f2b8c1e-5a47-4d9e-8b21-7c6d0e4a9f15",
   "task_title": "Submit data structures assignment",
   "description": "Chapters 4 and 5",
   "priority": "high",
@@ -273,13 +297,17 @@ Not an HTTP endpoint (❓ how it is triggered is open). When it runs at 6 AM:
 
 ### 3.4 Environment configuration (names only)
 
-The team needs to agree on how these are provided in each environment: database connection, Brevo API key, session secret, allowed frontend origin, backend base URL. Secrets must never be committed to GitHub.
+Settings are provided as environment variables: database connection (`DATABASE_URL`), Brevo API key (`BREVO_API_KEY`), session secret (`SESSION_SECRET`) and allowed frontend origin (`FRONTEND_ORIGIN`).
+- Locally, the backend reads them from `backend/.env`, which is never committed. `backend/.env.example` lists the names with fake values.
+- On Render, they are set in the service's Environment settings.
+- The frontend holds no secrets. It only needs the public backend URL, `VITE_BACKEND_URL`, set locally in `frontend/.env` and in the Vercel settings.
+- Secrets must never be committed to GitHub.
 
 ---
 
 ## 4. Testing Approach
 
-- **Backend:** pytest for every endpoint, including the unhappy paths (unverified login, expired token, another user's task).
+- **Backend:** pytest for every endpoint, including the unhappy paths (unverified login, expired code, another user's task).
 - **Frontend:** linting on every change. ❓ Linter not chosen.
 - **Integration:** every milestone below ends with an integration test where the **deployed or local frontend talks to the real backend**.
 
@@ -291,7 +319,8 @@ The team needs to agree on how these are provided in each environment: database 
 - Backend developer: Maurice123-Tech. Frontend developer: Mac Ty.
 - Update section 3 of this file before changing any endpoint so both sides stay in sync.
 - Do not start the next milestone until the current milestone's integration test passes.
-- ❓ Branching workflow and CI not decided.
+- Branching: the backend developer works on the `backend` branch and the frontend developer on `frontend`. Both merge into `dev` through pull requests, where the milestone is tested together. Only tested work from `dev` is merged into `main`.
+- ❓ CI is not decided.
 
 ---
 
@@ -319,18 +348,18 @@ Each milestone has a **Backend** part, a **Frontend** part and an **Integration 
 ### Milestone 1: Sign up and email verification (Day 2)
 
 **Backend**
-- `users` table and email-token table.
+- `users` table and email-codes table, created with Alembic migrations.
 - `POST /auth/signup` with validation and password hashing.
-- Send the verification email through Brevo.
-- `GET /auth/verify-email` with the 5-minute expiry and single use.
-- pytest: valid signup, duplicate email, invalid input, valid token, expired token, reused token.
+- Send the 6-digit verification code by email through Brevo.
+- `POST /auth/verify-email` with the 5-minute expiry, single use, and the 5-wrong-attempts limit.
+- `POST /auth/resend-verification` with the 60-second wait.
+- pytest: valid signup, duplicate email, invalid input (including a weak password), valid code, wrong code, expired code, reused code, code invalidated after 5 wrong attempts, resend replaces the old code, resend within 60 seconds sends no new code.
 
 **Frontend**
 - Sign-up page with field validation and clear error messages.
-- A "check your email" message after signing up.
-- A page that shows the result of the verification link (success, expired or invalid).
+- A code-entry page shown after sign-up: a 6-digit input, a resend button with a 60-second countdown, and clear messages for a wrong, expired or invalid code.
 
-**Integration test:** sign up from the frontend, receive the real email, click the link within 5 minutes, and see the user marked verified in the database. A link older than 5 minutes is rejected.
+**Integration test:** sign up from the frontend, receive the real email with the code, enter it within 5 minutes, and see the user marked verified in the database. A code older than 5 minutes is rejected, and after requesting a new code the old one no longer works.
 
 ### Milestone 2: Login, session and logout (Day 3)
 
@@ -352,14 +381,14 @@ Each milestone has a **Backend** part, a **Frontend** part and an **Integration 
 
 **Backend**
 - `POST /auth/forgot-password` and `POST /auth/reset-password`.
-- Reset email through Brevo, with token expiry and single use.
-- pytest: unknown email, valid reset, expired token, reused token, weak new password.
+- Reset code email through Brevo, with the 10-minute expiry, single use, and the 5-wrong-attempts limit.
+- pytest: unknown email, valid reset, wrong code, expired code, reused code, code invalidated after 5 wrong attempts, a new code replaces the old one, weak new password.
 
 **Frontend**
-- "Forgot password" page and "set new password" page.
+- "Forgot password" page, and a page to enter the code and the new password.
 - Success and error messages.
 
-**Integration test:** request a reset, receive the email, set a new password, log in with the new password, and confirm the old one no longer works.
+**Integration test:** request a reset, receive the code by email, set a new password, log in with the new password, and confirm the old one no longer works.
 
 ### Milestone 4: Create and save a task (Day 4)
 
@@ -440,13 +469,15 @@ Each milestone has a **Backend** part, a **Frontend** part and an **Integration 
 | A1 | **What triggers the 6 AM reminder run?** This blocks Milestone 7. |
 | A2 | Where is session data stored (database table, memory, other)? How long does a session last? |
 | A3 | Cookie settings for the cross-domain setup (Vercel to Render), so the browser keeps and sends the cookie |
-| A4 | Does the verification link point to the backend or to a frontend page? Same question for the reset link |
 | A5 | Is "create" and "save" one API call (as drafted) or two separate calls? |
-| A6 | Primary key type: integer or UUID? |
-| A7 | How are verification and reset tokens generated and stored? |
 | A8 | How is a duplicate reminder on the same day prevented, and are sent reminders recorded? |
-| A9 | Which hashing method is used for passwords? |
-| A10 | Which database migration tool is used? SQLAlchemy is the ORM; a tool for schema changes has not been chosen |
-| A11 | Folder layout of the single repository |
-| A12 | How environment variables and secrets are managed locally and on Vercel and Render |
+| A9 | Which hashing method is used for passwords and codes? (Both are hashed, the library is chosen when the code is written.) |
 | A13 | Endpoint paths in section 3 (all marked ⚠) |
+
+**Decided**
+- A4: There are no links. Verification and password reset both use 6-digit codes.
+- A6: Primary keys are UUIDs.
+- A7: Codes are 6 digits, stored hashed, with a 5-minute expiry for verification and 10 minutes for reset. A new code replaces the old one, with 60 seconds between requests and 5 wrong attempts before a code stops working.
+- A10: Alembic is the migration tool.
+- A11: Two folders at the repository root: `backend/` and `frontend/`.
+- A12: Environment variables, with `.env` locally and each host's settings in production (see 3.4).
